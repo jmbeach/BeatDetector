@@ -4,7 +4,7 @@
  *
  * kontakt [at] stasilo.se
  *
- * A pretty rudimentary but working beat detector. Built using the Web audio api. 
+ * A pretty rudimentary but working beat detector. Built using the Web audio api.
  * Based on comparing average shift in freq amplitudes in a current sample to a sample history.
  * Catches heavy beat hits pretty accurately (techno, house, hip hop, that kinda stuff)
  */
@@ -19,30 +19,30 @@ if (typeof stasilo == 'undefined')
 
 (function()
 {
-	// create audio context 
-	// one per document/page!! 	
+	// create audio context
+	// one per document/page!!
 
-	var context = null; 
+	var context = null;
 
-	try 
-	{ 
+	try
+	{
 		context = new ( window.AudioContext || window.webkitAudioContext )();
-	} 
-	catch(e) 
-	{ 
-	    alert('Sorry, the web audio api is not supported by your browser!'); 
-	} 
+	}
+	catch(e)
+	{
+	    alert('Sorry, the web audio api is not supported by your browser!');
+	}
 
 	// constructor
 
-	this.BeatDetector = function(settings) 
+	this.BeatDetector = function(settings)
 	{
 		if( !(this instanceof stasilo.BeatDetector) )
 		{
 			return new BeatDetector(settings);
 		}
 
-		//globals 
+		//globals
 		this.historyBuffer = [];
 		this.instantEnergy = 0;
 		this.prevTime = 0;
@@ -51,28 +51,32 @@ if (typeof stasilo == 'undefined')
 		this.bpm = {time: 0, counter: 0};
 
 		this.startTime = 0, this.startOffset = 0;
-		this.settings = settings; 
+		this.settings = settings;
+		this.context = context;
 
 		// check if song download is in progress
-		this.loading = false; 
+		this.loading = false;
 
 	    // create analyzer node
 	    this.analyser = context.createAnalyser();
 	    this.visualizer = context.createAnalyser();
 
-		this.visualizer.fftSize = (settings.visualizerFFTSize ? settings.visualizerFFTSize : 256); 
-		this.analyser.fftSize = (settings.analyserFFTSize ? settings.analyserFFTSize : 256); 
+		this.visualizer.fftSize = (settings.visualizerFFTSize ? settings.visualizerFFTSize : 256);
+		this.analyser.fftSize = (settings.analyserFFTSize ? settings.analyserFFTSize : 256);
+
+		// more settings
+		this.onLoaded = settings.onLoaded;
 
 	   /*
-		* 44100 hertz á 16 bit = 
+		* 44100 hertz á 16 bit =
 		* each sample is 16 bits and is taken 44100 times a second
 		* for each second: 16 * 44100 bits = 705600 bits = 88200 = 44100 * 2 bytes per second of audio (stereo)
 		*
 		* The fft in web audio seems to analyze 1024 samples each call =>
-		* 43 * 1024 = 44032 
+		* 43 * 1024 = 44032
 		*
 		* This means we have to call getByteFrequencyData() 43 times, thus receiving a MAX_COLLECT_SIZE
-		* of 43 * 128 = 5504 for 1s of audio (in case fft = 256) in the historyBuffer or 
+		* of 43 * 128 = 5504 for 1s of audio (in case fft = 256) in the historyBuffer or
 		* 43 * (fftSize / 2) = MAX_COLLECT_SIZE for a variable fft size.
 		*/
 
@@ -80,16 +84,16 @@ if (typeof stasilo == 'undefined')
 		this.COLLECT_SIZE = 1;
 
 		//sensitivity of detection
-		this.sens = 1 + (settings.sens ? settings.sens / 100 : 0.05);  
+		this.sens = 1 + (settings.sens ? settings.sens / 100 : 0.05);
 
 
-		//microphone 
+		//microphone
 		navigator.getUserMedia  =	navigator.getUserMedia ||
 	                        		navigator.webkitGetUserMedia ||
 	                          		navigator.mozGetUserMedia ||
-	                          		navigator.msGetUserMedia; 
+	                          		navigator.msGetUserMedia;
 
-	    this.bufferLength = this.analyser.frequencyBinCount;	
+	    this.bufferLength = this.analyser.frequencyBinCount;
 
 		//create empty historybuffer
 		for(i = 0; this.historyBuffer.length < this.MAX_COLLECT_SIZE - this.COLLECT_SIZE - 1; i++)
@@ -99,20 +103,20 @@ if (typeof stasilo == 'undefined')
 
 	    // create low pass bandpassFilter node
 	    // used to isolate freq spectrum for beat detection
-	    // optional 
+	    // optional
 
 		this.bandpassFilter = context.createBiquadFilter();
 
-		this.bandpassFilter.type = (typeof this.bandpassFilter.type === 'string') ? 'bandpass' : 2; 
-		this.bandpassFilter.frequency.value = (settings.passFreq ? settings.passFreq : 400); 
-		this.bandpassFilter.Q.value = 0.5; 
+		this.bandpassFilter.type = (typeof this.bandpassFilter.type === 'string') ? 'bandpass' : 2;
+		this.bandpassFilter.frequency.value = (settings.passFreq ? settings.passFreq : 400);
+		this.bandpassFilter.Q.value = 0.5;
 
 		// create gain node
 		this.gainNode = (context.createGain() || context.createGainNode());
 
-		var self = this; // for later async access 
+		var self = this; // for later async access
 
-	    if(settings.url) // url supplied as soundsource 
+	    if(settings.url) // url supplied as soundsource
 	    {
 		    // load the sound
 	    	this.soundSource = context.createBufferSource();
@@ -120,25 +124,25 @@ if (typeof stasilo == 'undefined')
 	    	// don't use $.ajax() to keep beatdetector dependency free (even of jquery)
 	 	    var request = new XMLHttpRequest();
 
-	 	    this.loading = true; 
+	 	    this.loading = true;
 		    request.open("GET", settings.url, true);
 		    request.responseType = "arraybuffer";
 
 
 		    //send progress info to callback if avail.
-		    if (typeof this.settings.progress == 'function') 
-			{ 
-			    request.addEventListener("progress", function(e) 
+		    if (typeof this.settings.progress == 'function')
+			{
+			    request.addEventListener("progress", function(e)
 			    {
-			    	var percent = 0; 
+			    	var percent = 0;
 
-					if ( e.lengthComputable ) 
+					if ( e.lengthComputable )
 					{
 						 percent = ( e.loaded / e.total ) * 100;
 
 					}
 
-					settings.progress( {percent: percent, complete: false} ); 
+					settings.progress( {percent: percent, complete: false} );
 
 			    }, false);
 
@@ -152,45 +156,50 @@ if (typeof stasilo == 'undefined')
 
 		    // this loads asynchronously
 
-		    request.onload = function() 
+		    request.onload = function()
 		    {
 		        var audioData = request.response;
 
 			    // add buffer to sound source
-				context.decodeAudioData(audioData, 
+				context.decodeAudioData(audioData,
 				function(buffer)
 				{
 			    	self.soundSource.buffer = self.soundBuffer = buffer;
 
 			    	//save length of buffer
-			        self.currentDuration = self.soundBuffer.duration; 
+			        self.currentDuration = self.soundBuffer.duration;
 			        //self.soundSource.loop = true;
 
 			        self.loading = false;
+							// if an onLoaded function was passed in as a setting
+							if (self.onLoaded) {
+								// call it now
+								self.onLoaded();
+							}
 			        self.startTime = context.currentTime;
 
 				},
 
-				function(e) 
+				function(e)
 				{
 					alert("Error decoding audio data");
-					
+
 					console.log(e);
-				});	
+				});
 		    };
 
 		    request.send();
 
-			// Connect analyser and context to source 
+			// Connect analyser and context to source
 	   		// source -> bandpassFilter -> analyse -> gain -> destination
 
-	    	this.connectGraph(); 
+	    	this.connectGraph();
 
 
 	    	this.soundSource.start ? this.soundSource.start(0) : this.soundSource.noteOn(0);
-		} 
+		}
 		else //microphone as soundsource
-		{		
+		{
 		    function gotStream(stream)
 		    {
 				self.soundSource = context.createMediaStreamSource(stream);
@@ -200,16 +209,16 @@ if (typeof stasilo == 'undefined')
 
 				self.soundSource.connect(self.gainNode);
 
-				self.gainNode.connect(context.destination);	
+				self.gainNode.connect(context.destination);
 
-				self.micStream = stream; 		
+				self.micStream = stream;
 			}
 
 		    navigator.getUserMedia(
 	        {
-	            "audio": 
+	            "audio":
 	            {
-	                "mandatory": 
+	                "mandatory":
 	                {
 	                    "googEchoCancellation": "false",
 	                    "googAutoGainControl": "false",
@@ -220,19 +229,19 @@ if (typeof stasilo == 'undefined')
 	                "optional": []
 	            },
 
-	        }, gotStream, 
-	        function(e) 
+	        }, gotStream,
+	        function(e)
 	        {
 	            alert('Error getting microphone audio');
 	            console.log(e);
-	    	});		
+	    	});
 		}
 	}
 
 
-	//methods 
+	//methods
 
-	this.BeatDetector.prototype = 
+	this.BeatDetector.prototype =
 	{
 		setVolume: function(volume)
 		{
@@ -241,14 +250,14 @@ if (typeof stasilo == 'undefined')
 
 	  	getVolume: function()
 	  	{
-	  		return this.gainNode.gain.value; 
+	  		return this.gainNode.gain.value;
 	  	},
 
 		pause: function()
 		{
-			//check if running from url 
+			//check if running from url
 			if(this.soundSource.playbackState === this.soundSource.PLAYING_STATE)
-			{			
+			{
 				this.soundSource.stop(0);
 
 				// measure how much time passed since the last pause/stop.
@@ -256,26 +265,26 @@ if (typeof stasilo == 'undefined')
 			}
 			else if(typeof this.micStream !== 'undefined') //or mic
 			{
-				this.micStream.stop(); 
+				this.micStream.stop();
 			}
 		},
 
 
 		play: function(offset)
 		{
-			// fast forward or rewind if offset is supplied 
-			
+			// fast forward or rewind if offset is supplied
+
 			this.startOffset += offset;
 
-			if(this.startOffset < 0) 
+			if(this.startOffset < 0)
 			{
-				this.startOffset = 0; 
+				this.startOffset = 0;
 			}
 
 			this.soundSource = context.createBufferSource();
 			this.soundSource.buffer = this.soundBuffer;
 
-			this.connectGraph(); 
+			this.connectGraph();
 
 			// start playback, but make sure we stay in bound of the buffer.
 
@@ -288,7 +297,7 @@ if (typeof stasilo == 'undefined')
 		isFinished: function(offset)
 		{
 
-			var dur = ((this.currentDuration === "undefined") ? 0 : this.currentDuration); 
+			var dur = ((this.currentDuration === "undefined") ? 0 : this.currentDuration);
 
 			if( this.getElapsedTime() >= dur && dur != 0) //played whole buffer
 			{
@@ -297,13 +306,13 @@ if (typeof stasilo == 'undefined')
 					this.soundSource.stop(0);
 
 					//run callback if supplied
-					if (typeof this.settings.playbackFinished == 'function') 
-					{ 
+					if (typeof this.settings.playbackFinished == 'function')
+					{
 						this.settings.playbackFinished();
 					}
 				}
 
-				return true; 
+				return true;
 			}
 		},
 
@@ -315,7 +324,7 @@ if (typeof stasilo == 'undefined')
 			//this.soundSource.loop = true;
 			//this.soundSource.connect(context.destination);
 
-			if(this.settings.passFreq) 
+			if(this.settings.passFreq)
 	    	{
 	    		this.soundSource.connect(this.bandpassFilter);
 	    		this.bandpassFilter.connect(this.analyser);
@@ -326,26 +335,26 @@ if (typeof stasilo == 'undefined')
 	    	{
 	    		this.soundSource.connect(this.analyser);
 	    	}
-	    		
+
 	    	this.soundSource.connect(this.visualizer);
 	    	this.soundSource.connect(this.gainNode);
 	    	//bandpassFilter.connect(gainNode);
 
 	    	this.gainNode.connect(context.destination);
-	    	//this.gainNode.connect(this.visualizer);	
+	    	//this.gainNode.connect(this.visualizer);
 
 		},
 
-		/* 
-		 * Call his from the main render loop. Returns true if song is on a peak/beat, 
+		/*
+		 * Call his from the main render loop. Returns true if song is on a peak/beat,
 		 * false otherwise.
 		 */
 
-		isOnBeat: function() 
+		isOnBeat: function()
 		{
 			var localAverageEnergy = 0;
-			var instantCounter = 0; 		
-			var isBeat = false; 
+			var instantCounter = 0;
+			var isBeat = false;
 
 			var bpmArray = new Uint8Array(this.bufferLength);
 	  		this.analyser.getByteFrequencyData(bpmArray); //size = 128 * [0, 256](?)
@@ -353,18 +362,18 @@ if (typeof stasilo == 'undefined')
 	  		// check if audio has finished playing
 	  		this.isFinished();
 
-	  		// fill history buffer 
+	  		// fill history buffer
 			for(var i = 0; i < bpmArray.length - 1; i++, ++instantCounter)
 			{
 				this.historyBuffer.push(bpmArray[i]);  //add sample to historyBuffer
 
-				this.instantEnergy += bpmArray[i]; 
+				this.instantEnergy += bpmArray[i];
 			}
 
-			//done collecting MAX_COLLECT_SIZE history samples 
+			//done collecting MAX_COLLECT_SIZE history samples
 			//have COLLECT_SIZE nr of samples as instant energy value
 
-			if(instantCounter > this.COLLECT_SIZE - 1  && 
+			if(instantCounter > this.COLLECT_SIZE - 1  &&
 				this.historyBuffer.length > this.MAX_COLLECT_SIZE - 1)
 			{
 				this.instantEnergy = this.instantEnergy / (this.COLLECT_SIZE * (this.analyser.fftSize / 2));
@@ -372,16 +381,16 @@ if (typeof stasilo == 'undefined')
 				var average = 0;
 				for(var i = 0; i < this.historyBuffer.length - 1; i++)
 				{
-					average += this.historyBuffer[i]; 
+					average += this.historyBuffer[i];
 				}
 
 				localAverageEnergy = average/this.historyBuffer.length;
 
 				var timeDiff = context.currentTime - this.prevTime;
 
-				// timeDiff > 2 is out of normal song bpm range, but if it is a multiple of range [0.3, 1.5] 
+				// timeDiff > 2 is out of normal song bpm range, but if it is a multiple of range [0.3, 1.5]
 				// we probably have missed a beat before but now have a match in the bpm table.
-				
+
 				if(timeDiff > 2 && this.bpmTable.length > 0)
 				{
 					//console.log("timediff is now greater than 3");
@@ -393,25 +402,25 @@ if (typeof stasilo == 'undefined')
 						// mutiply by 10 to avoid float rounding errors
 						var timeDiffInteger = Math.round( (timeDiff / this.bpmTable[j]['time']) * 1000 );
 
-						// timeDiffInteger should now be a multiple of a number in range [3, 15] 
+						// timeDiffInteger should now be a multiple of a number in range [3, 15]
 						// if we have a match
 
 						if(timeDiffInteger % (Math.round(this.bpmTable[j]['time']) * 1000) == 0)
 						{
-							timeDiff = new Number(this.bpmTable[j]['time']); 
+							timeDiff = new Number(this.bpmTable[j]['time']);
 							//console.log("TIMEDIFF MULTIPLE MATCH: " + timeDiff);
 						}
-					}				
+					}
 				}
-				
+
 
 				//still?
 				if(timeDiff > 3)
 				{
-					this.prevTime = timeDiff = 0; 
+					this.prevTime = timeDiff = 0;
 
 				}
-						
+
 				////////////////////////
 				// MAIN BPM HIT CHECK //
 				////////////////////////
@@ -420,15 +429,15 @@ if (typeof stasilo == 'undefined')
 				// Also check if we have _any_ found prev beats
 
 				if( context.currentTime > 0.29 && this.instantEnergy > localAverageEnergy &&
-					( this.instantEnergy > (this.sens * localAverageEnergy) )  && 
+					( this.instantEnergy > (this.sens * localAverageEnergy) )  &&
 				  	( ( timeDiff < 2.0  && timeDiff > 0.29 ) || this.prevTime == 0  ) )
 				{
 
-					isBeat = true; 
+					isBeat = true;
 
 					this.prevTime = context.currentTime;
 
-					this.bpm = 
+					this.bpm =
 					{
 							time: timeDiff.toFixed(3),
 							counter: 1,
@@ -445,12 +454,12 @@ if (typeof stasilo == 'undefined')
 							this.bpm = 0;
 
 							if(this.bpmTable[j]['counter'] > 3 && j < 2)
-							{		      
+							{
 								console.log("WE HAVE A BEAT MATCH IN TABLE!!!!!!!!!!");
 							}
 
 							break;
-						} 
+						}
 					}
 
 					if(this.bpm != 0 || this.bpmTable.length == 0)
@@ -462,25 +471,25 @@ if (typeof stasilo == 'undefined')
 					this.bpmTable.sort(function(a, b)
 					{
 						return b['counter'] - a['counter']; //descending sort
-					});			
-				} 
+					});
+				}
 
 				var temp = this.historyBuffer.slice(0); //get copy of buffer
 
 				this.historyBuffer = []; //clear buffer
 
 				// make room in array by deleting the last COLLECT_SIZE samples.
-				this.historyBuffer = temp.slice(this.COLLECT_SIZE * (this.analyser.fftSize / 2), temp.length);						
+				this.historyBuffer = temp.slice(this.COLLECT_SIZE * (this.analyser.fftSize / 2), temp.length);
 
 				instantCounter = 0;
-				this.instantEnergy = 0; 
+				this.instantEnergy = 0;
 
 				localAverageEnergy = 0;
 
 			}
 
 
-			this.debug = ""; 
+			this.debug = "";
 
 			for(i = 0; i < 10; i++)
 			{
@@ -490,14 +499,14 @@ if (typeof stasilo == 'undefined')
 				this.debug += ('Beat ' + i + ': ' + this.bpmTable[i]['time'] + ', counter: ' + this.bpmTable[i]['counter'] + ', calc. bpm: ' + Math.round(60/this.bpmTable[i]['time']) + '<br>');
 			}
 
-			this.debug += ( "history buffer size: " + this.historyBuffer.length + "<br>"); 
-			this.debug += ( "instant energy: " + this.instantEnergy  + "<br>"); 
-			this.debug += ( "local energy: " + localAverageEnergy  + "<br>"); 
+			this.debug += ( "history buffer size: " + this.historyBuffer.length + "<br>");
+			this.debug += ( "instant energy: " + this.instantEnergy  + "<br>");
+			this.debug += ( "local energy: " + localAverageEnergy  + "<br>");
 
 			this.debug += ( "bpmArray size: " + bpmArray.length + "<br>");
 			this.debug += "sensitivity: " + ( (this.sens - 1) * 100 ).toFixed(2) + "<br>";
-		    
-	  		return isBeat; 
+
+	  		return isBeat;
 		},
 
 		getAudioFreqData: function()
@@ -506,32 +515,32 @@ if (typeof stasilo == 'undefined')
 
 			this.visualizer.getByteFrequencyData(dataArray);
 
-			return dataArray; 
+			return dataArray;
 		},
 
 		getTimeDomainData: function()
 		{
 			var dataArray = new Uint8Array(this.bufferLength);
-			
-			this.visualizer.getByteTimeDomainData(dataArray);	
 
-			return dataArray; 
-		},	
+			this.visualizer.getByteTimeDomainData(dataArray);
 
-		//duration of the current sample 
+			return dataArray;
+		},
+
+		//duration of the current sample
 		getDuration: function()
 		{
-			return (typeof this.soundBuffer === 'undefined' ) ? 0 : this.soundBuffer.duration; 
+			return (typeof this.soundBuffer === 'undefined' ) ? 0 : this.soundBuffer.duration;
 		},
 
 		getElapsedTime: function()
 		{
-			return ( context.currentTime + this.startOffset - this.startTime ); 
+			return ( context.currentTime + this.startOffset - this.startTime );
 		},
 
 		getDebugData: function()
 		{
-			return this.debug;  
+			return this.debug;
 		},
 
 		getFileName: function()
@@ -544,22 +553,22 @@ if (typeof stasilo == 'undefined')
 		getBPMGuess: function()
 		{
 			var guesses = allGuesses = 0;
-			var counter = 0; 	
-				
+			var counter = 0;
+
 			if(this.bpmTable.length <= 2)
 			{
-				return -1; 
+				return -1;
 			}
 
 			for(var i = 0; i < this.bpmTable.length; i++)
 			{
-				allGuesses += (new Number(this.bpmTable[i]['time'])); 
+				allGuesses += (new Number(this.bpmTable[i]['time']));
 
 				if(this.bpmTable[i]['counter'] > 1)
 				{
-					guesses += (new Number(this.bpmTable[i]['time'])); 
+					guesses += (new Number(this.bpmTable[i]['time']));
 
-					counter++; 
+					counter++;
 				}
 			}
 
